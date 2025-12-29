@@ -5,7 +5,7 @@ PORT = 5025
 
 IDN_RESPONSE = "HPE,SIM-SA,0001,0.1\n"
 
-# Step 14: simulator state variables (defaults requested)
+# Step 14: simulator state (defaults)
 freq_start = 30e6
 freq_stop = 1e9
 points = 1001
@@ -24,7 +24,7 @@ def handle_client(conn: socket.socket, addr) -> None:
                 print("[SCPI_SIM] Client disconnected")
                 return
 
-            # Step 12.c: line-based command parsing
+            # Step 12.c: line-based parsing
             buffer += data
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)
@@ -39,27 +39,43 @@ def handle_client(conn: socket.socket, addr) -> None:
                 if u == "*IDN?":
                     response = IDN_RESPONSE
 
-                # Optional: let clients inspect state (handy for testing)
+                # ----- Step 15: setters (with common variants) -----
+
+                # FREQ:STAR / FREQ:START
+                elif u.startswith("FREQ:STAR ") or u.startswith("FREQ:START "):
+                    try:
+                        freq_start = float(cmd.split()[-1])
+                        response = "OK\n"
+                    except ValueError:
+                        response = "ERR\n"
+
+                # FREQ:STOP
+                elif u.startswith("FREQ:STOP "):
+                    try:
+                        freq_stop = float(cmd.split()[-1])
+                        response = "OK\n"
+                    except ValueError:
+                        response = "ERR\n"
+
+                # SWE:POIN / SWE:POINTS
+                elif u.startswith("SWE:POIN ") or u.startswith("SWE:POINTS "):
+                    try:
+                        points = int(float(cmd.split()[-1]))
+                        response = "OK\n"
+                    except ValueError:
+                        response = "ERR\n"
+
+                # Optional queries (very useful for testing)
                 elif u == "FREQ:STAR?":
                     response = f"{freq_start}\n"
-                elif u.startswith("FREQ:STAR "):
-                    freq_start = float(cmd.split()[-1])
-                    response = "OK\n"
-
                 elif u == "FREQ:STOP?":
                     response = f"{freq_stop}\n"
-                elif u.startswith("FREQ:STOP "):
-                    freq_stop = float(cmd.split()[-1])
-                    response = "OK\n"
-
                 elif u in ("SWE:POIN?", "SWE:POINTS?"):
                     response = f"{points}\n"
-                elif u.startswith("SWE:POIN ") or u.startswith("SWE:POINTS "):
-                    points = int(float(cmd.split()[-1]))
-                    response = "OK\n"
 
                 elif u == "*OPC?":
                     response = "1\n"
+
                 else:
                     response = "OK\n"
 

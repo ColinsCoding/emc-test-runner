@@ -5,7 +5,15 @@ PORT = 5025
 
 IDN_RESPONSE = "HPE,SIM-SA,0001,0.1\n"
 
+# Step 14: simulator state variables (defaults requested)
+freq_start = 30e6
+freq_stop = 1e9
+points = 1001
+
+
 def handle_client(conn: socket.socket, addr) -> None:
+    global freq_start, freq_stop, points
+
     print(f"[SCPI_SIM] Client connected: {addr}")
     buffer = b""
 
@@ -16,6 +24,7 @@ def handle_client(conn: socket.socket, addr) -> None:
                 print("[SCPI_SIM] Client disconnected")
                 return
 
+            # Step 12.c: line-based command parsing
             buffer += data
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)
@@ -24,10 +33,31 @@ def handle_client(conn: socket.socket, addr) -> None:
                     continue
 
                 print(f"[SCPI_SIM] RX: {cmd}")
-
                 u = cmd.upper()
+
+                # Step 13: *IDN?
                 if u == "*IDN?":
                     response = IDN_RESPONSE
+
+                # Optional: let clients inspect state (handy for testing)
+                elif u == "FREQ:STAR?":
+                    response = f"{freq_start}\n"
+                elif u.startswith("FREQ:STAR "):
+                    freq_start = float(cmd.split()[-1])
+                    response = "OK\n"
+
+                elif u == "FREQ:STOP?":
+                    response = f"{freq_stop}\n"
+                elif u.startswith("FREQ:STOP "):
+                    freq_stop = float(cmd.split()[-1])
+                    response = "OK\n"
+
+                elif u in ("SWE:POIN?", "SWE:POINTS?"):
+                    response = f"{points}\n"
+                elif u.startswith("SWE:POIN ") or u.startswith("SWE:POINTS "):
+                    points = int(float(cmd.split()[-1]))
+                    response = "OK\n"
+
                 elif u == "*OPC?":
                     response = "1\n"
                 else:
@@ -35,6 +65,7 @@ def handle_client(conn: socket.socket, addr) -> None:
 
                 conn.sendall(response.encode())
                 print(f"[SCPI_SIM] TX: {response.strip()}")
+
 
 def main() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
@@ -47,6 +78,7 @@ def main() -> None:
         while True:
             conn, addr = server.accept()
             handle_client(conn, addr)
+
 
 if __name__ == "__main__":
     main()

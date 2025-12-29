@@ -10,9 +10,12 @@ freq_start = 30e6
 freq_stop = 1e9
 points = 1001
 
+# New: measurement arm state
+armed = False
+
 
 def handle_client(conn: socket.socket, addr) -> None:
-    global freq_start, freq_stop, points
+    global freq_start, freq_stop, points, armed
 
     print(f"[SCPI_SIM] Client connected: {addr}")
     buffer = b""
@@ -38,6 +41,15 @@ def handle_client(conn: socket.socket, addr) -> None:
                 # Step 13: *IDN?
                 if u == "*IDN?":
                     response = IDN_RESPONSE
+
+                # INIT / INIT:IMM -> arm a measurement (instant for now)
+                elif u in ("INIT", "INIT:IMM"):
+                    armed = True
+                    response = "OK\n"
+
+                # Optional: query arm state (useful for tests)
+                elif u == "INIT?":
+                    response = ("1\n" if armed else "0\n")
 
                 # ----- Step 15: setters (with common variants) -----
 
@@ -73,6 +85,7 @@ def handle_client(conn: socket.socket, addr) -> None:
                 elif u in ("SWE:POIN?", "SWE:POINTS?"):
                     response = f"{points}\n"
 
+                # Operation complete (instant)
                 elif u == "*OPC?":
                     response = "1\n"
 

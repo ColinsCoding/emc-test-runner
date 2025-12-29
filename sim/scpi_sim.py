@@ -13,6 +13,29 @@ freq_stop = 1e9
 points = 1001
 armed = False
 
+def make_trace(points: int) -> str:
+    # Noise floor around -90 dBm, plus two Gaussian peaks
+    noise_mu = -90.0
+    noise_sigma = 2.0
+
+    # peaks positioned in normalized index-space (0..1)
+    p1_center = 0.20
+    p2_center = 0.65
+    p1_width = 0.03
+    p2_width = 0.06
+    p1_height = 25.0
+    p2_height = 18.0
+
+    vals = []
+    for i in range(points):
+        x = i / max(points - 1, 1)
+        a = random.gauss(noise_mu, noise_sigma)
+        g1 = p1_height * math.exp(-0.5 * ((x - p1_center) / p1_width) ** 2)
+        g2 = p2_height * math.exp(-0.5 * ((x - p2_center) / p2_width) ** 2)
+        vals.append(a + g1 + g2)
+
+    return ",".join(f"{v:.2f}" for v in vals) + "\n"
+
 
 def make_trace_dbm(f_start: float, f_stop: float, npts: int) -> list[float]:
     """
@@ -90,7 +113,7 @@ def handle_client(conn: socket.socket, addr) -> None:
                 # INIT / INIT:IMM (arm measurement)
                 elif u in ("INIT", "INIT:IMM"):
                     armed = True
-                    response = "OK\n"
+                    response = ""
 
                 # Optional: query arm state
                 elif u == "INIT?":
@@ -100,21 +123,21 @@ def handle_client(conn: socket.socket, addr) -> None:
                 elif u.startswith("FREQ:STAR ") or u.startswith("FREQ:START "):
                     try:
                         freq_start = float(cmd.split()[-1])
-                        response = "OK\n"
+                        response = ""
                     except ValueError:
                         response = "ERR\n"
 
                 elif u.startswith("FREQ:STOP "):
                     try:
                         freq_stop = float(cmd.split()[-1])
-                        response = "OK\n"
+                        response = ""
                     except ValueError:
                         response = "ERR\n"
 
                 elif u.startswith("SWE:POIN ") or u.startswith("SWE:POINTS "):
                     try:
                         points = int(float(cmd.split()[-1]))
-                        response = "OK\n"
+                        response = ""
                     except ValueError:
                         response = "ERR\n"
 
@@ -143,7 +166,13 @@ def handle_client(conn: socket.socket, addr) -> None:
                 else:
                     response = "OK\n"
 
-                conn.sendall(response.encode())
+                if response:
+                    try:
+                        conn.sendall(response.encode())
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+                        print(f"[SCPI_SIM] Send failed (client dropped): {e}")
+                        return
+
                 print(f"[SCPI_SIM] TX: {response[:80].strip()}{'...' if len(response) > 80 else ''}")
 
 
@@ -153,12 +182,25 @@ def main() -> None:
         server.bind((HOST, PORT))
         server.listen(1)
 
-        # Step 20: confirm it listens on 5025
+        # 👇 add timeout so Ctrl-C can interrupt
+        server.settimeout(1.0)
+
         print(f"[SCPI_SIM] Listening on {HOST}:{PORT}")
 
-        while True:
-            conn, addr = server.accept()
-            handle_client(conn, addr)
+        try:
+            while True:
+                try:
+                    conn, addr = server.accept()
+                except socket.timeout:
+                    continue   # loop again, allow Ctrl-C
+
+                handle_client(conn, addr)
+
+        except KeyboardInterrupt:
+            print("\n[SCPI_SIM] Shutdown requested (Ctrl-C)")
+
+        finally:
+            print("[SCPI_SIM] Simulator stopped")
 
 
 if __name__ == "__main__":

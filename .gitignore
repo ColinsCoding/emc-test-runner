@@ -1,0 +1,15 @@
+﻿# Virtual environments
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Native extensions
+*.so
+*.dll
+*.dylib
+
+# Build artifacts
+build/
+dist/

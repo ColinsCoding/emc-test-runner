@@ -1,6 +1,9 @@
 import socket
 import math
 import random
+import argparse
+import time
+
 
 HOST = "127.0.0.1"
 PORT = 5025
@@ -12,6 +15,11 @@ freq_start = 30e6
 freq_stop = 1e9
 points = 1001
 armed = False
+
+rng = random.Random()   # use our own RNG for determinism
+error_rate = 0.0
+drop_rate = 0.0
+
 
 def make_trace(points: int) -> str:
     # Noise floor around -90 dBm, plus two Gaussian peaks
@@ -29,7 +37,7 @@ def make_trace(points: int) -> str:
     vals = []
     for i in range(points):
         x = i / max(points - 1, 1)
-        a = random.gauss(noise_mu, noise_sigma)
+        a = rng.gauss(noise_mu, noise_sigma)
         g1 = p1_height * math.exp(-0.5 * ((x - p1_center) / p1_width) ** 2)
         g2 = p2_height * math.exp(-0.5 * ((x - p2_center) / p2_width) ** 2)
         vals.append(a + g1 + g2)
@@ -79,6 +87,28 @@ def make_trace_dbm(f_start: float, f_stop: float, npts: int) -> list[float]:
 
     return out
 
+def maybe_inject_drop(conn: socket.socket) -> bool:
+    """Return True if we intentionally dropped the connection."""
+    if drop_rate > 0.0 and rng.random() < drop_rate:
+        try:
+            conn.close()
+        finally:
+            return True
+    return False
+
+
+def maybe_inject_error(u_cmd: str) -> str | None:
+    """
+    Return an error response string (ending in \\n) or None.
+    We only inject timeouts for queries (commands ending with '?').
+    """
+    if not u_cmd.endswith("?"):
+        return None
+    if error_rate > 0.0 and rng.random() < error_rate:
+        return "ERROR:SIM_TIMEOUT\n"
+    return None
+
+
 
 def handle_client(conn: socket.socket, addr) -> None:
     global freq_start, freq_stop, points, armed
@@ -105,6 +135,22 @@ def handle_client(conn: socket.socket, addr) -> None:
                 print(f"[SCPI_SIM] RX: {cmd}")
 
                 u = cmd.upper()
+
+                if maybe_inject_drop(conn):
+                    print("[SCPI_SIM] Injected connection drop")
+                    return
+                
+                err = maybe_inject_error(u)
+                if err is not None:
+                    response = err
+                    # Send response (query expects a line), then continue
+                    try:
+                        conn.sendall(response.encode())
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+                        print(f"[SCPI_SIM] Send failed (client dropped): {e}")
+                        return
+                    print(f"[SCPI_SIM] TX: {response.strip()}")
+                    continue
 
                 # *IDN?
                 if u == "*IDN?":
@@ -177,12 +223,40 @@ def handle_client(conn: socket.socket, addr) -> None:
 
 
 def main() -> None:
+    global rng, error_rate, drop_rate
+
+
+    ap = argparse.ArgumentParser(
+        description="SCPI simulator with determinism and fault injection"
+    )
+    ap.add_argument("--seed", type=int, default=None,
+                    help="Seed RNG for deterministic traces")
+    ap.add_argument("--error-rate", type=float, default=0.0,
+                    help="Probability of ERROR:SIM_TIMEOUT on queries")
+    ap.add_argument("--drop-rate", type=float, default=0.0,
+                    help="Probability of dropping the socket")
+    args = ap.parse_args()
+
+    # ---- RNG setup ----
+    if args.seed is not None:
+        rng = random.Random(args.seed)
+        print(f"[SCPI_SIM] Deterministic mode enabled (seed={args.seed})")
+    else:
+        rng = random.Random()
+
+    # Clamp rates to [0,1]
+    error_rate = max(0.0, min(1.0, args.error_rate))
+    drop_rate = max(0.0, min(1.0, args.drop_rate))
+
+    print(f"[SCPI_SIM] error_rate={error_rate:.3f}, drop_rate={drop_rate:.3f}")
+
+    # ---- TCP server setup ----
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
         server.listen(1)
 
-        # 👇 add timeout so Ctrl-C can interrupt
+        # Important for Ctrl-C on Windows
         server.settimeout(1.0)
 
         print(f"[SCPI_SIM] Listening on {HOST}:{PORT}")
@@ -192,7 +266,7 @@ def main() -> None:
                 try:
                     conn, addr = server.accept()
                 except socket.timeout:
-                    continue   # loop again, allow Ctrl-C
+                    continue  # allow Ctrl-C to be processed
 
                 handle_client(conn, addr)
 
@@ -201,6 +275,7 @@ def main() -> None:
 
         finally:
             print("[SCPI_SIM] Simulator stopped")
+
 
 
 if __name__ == "__main__":

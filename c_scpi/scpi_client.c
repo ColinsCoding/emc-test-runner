@@ -6,7 +6,9 @@
 #ifdef _WIN32
   #include <winsock2.h>
   #include <ws2tcpip.h>
+  #ifdef _MSC_VER
   #pragma comment(lib, "Ws2_32.lib")
+  #endif
   typedef SOCKET scpi_sock_t;
   #define SCPI_INVALID_SOCK INVALID_SOCKET
   #define scpi_close_sock closesocket

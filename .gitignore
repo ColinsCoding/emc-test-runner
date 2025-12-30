@@ -14,3 +14,15 @@ __pycache__/
 build/
 dist/
 runs/
+
+# Run outputs (timestamped folders like 20251230_084213/)
+20*_*/
+
+# Logs / artifacts
+*.csv
+*.json
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/

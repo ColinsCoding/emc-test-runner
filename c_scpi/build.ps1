@@ -1,1 +1,1 @@
-gcc -Wall -O2 -shared -o scpi_client.dll scpi_client.c
+gcc -shared -o c_scpi\scpi_client.dll c_scpi\scpi_client.c -lws2_32

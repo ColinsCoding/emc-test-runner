@@ -1,15 +1,10 @@
 CC=gcc
 CFLAGS=-Wall -O2 -fPIC
-TARGET=libscpi_client
-
-ifeq ($(OS),Windows_NT)
-    EXT=.dll
-else
-    EXT=.so
-endif
+LDFLAGS=-shared
+LDLIBS=-lws2_32
 
 all:
-	$(CC) $(CFLAGS) -shared -o $(TARGET)$(EXT) scpi_client.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o libscpi_client.dll scpi_client.c $(LDLIBS)
 
 clean:
-	rm -f $(TARGET).so $(TARGET).dll
+	rm -f libscpi_client.dll

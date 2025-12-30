@@ -1,7 +1,19 @@
-import unittest
+import os, sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import statistics
 
-from core.instrument import Instrument
+BACKEND = os.environ.get("SCPI_BACKEND", "py").lower()
+
+if BACKEND == "c":
+    from core.instrument_c import InstrumentC as Instrument
+elif BACKEND == "py":
+    from core.instrument import Instrument
+else:
+    raise RuntimeError(f"Unknown SCPI_BACKEND={BACKEND!r}")
+
+
+# -------- Test configuration --------
 
 HOST = "127.0.0.1"
 PORT = 5025
@@ -22,40 +34,9 @@ def count_local_peaks(y: list[float], min_prominence: float) -> int:
     return c
 
 
-class TestScpiBasic(unittest.TestCase):
-    def test_trace_length_and_peaks(self):
-        inst = Instrument(HOST, PORT)
-        try:
-            inst.connect()
-
-            idn = inst.idn()
-            self.assertIn("HPE", idn)
-
-            inst.set_sweep(START_HZ, STOP_HZ, POINTS)
-            trace = inst.get_trace()
-
-            self.assertEqual(len(trace), POINTS)
-
-            peak_count = count_local_peaks(trace, min_prominence=6.0)
-            self.assertGreaterEqual(peak_count, 2)
-
-        finally:
-            inst.close()
-
-
-def smoke() -> None:
-    """
-    Day-1 checklist smoke test:
-      - start simulator manually in another terminal
-      - connect
-      - print IDN
-      - set sweep
-      - fetch trace
-      - assert length == points
-      - print 'trace points OK'
-    """
-    print("NOTE: Start the simulator in another terminal:")
-    print("  python .\\sim\\scpi_sim.py\n")
+def main() -> None:
+    print(f"SCPI_BACKEND = {BACKEND}")
+    print("NOTE: Simulator must already be running.\n")
 
     inst = Instrument(HOST, PORT)
     inst.connect()
@@ -67,11 +48,15 @@ def smoke() -> None:
     trace = inst.get_trace()
 
     assert len(trace) == POINTS, f"Trace length {len(trace)} != {POINTS}"
+
+    peak_count = count_local_peaks(trace, min_prominence=6.0)
+    assert peak_count >= 2, f"Expected >=2 peaks, got {peak_count}"
+
     print("trace points OK")
+    print("peaks detected OK")
 
     inst.close()
 
 
 if __name__ == "__main__":
-    # Running as a script -> prints the exact lines you need to screenshot
-    smoke()
+    main()

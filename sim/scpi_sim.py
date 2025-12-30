@@ -118,10 +118,16 @@ def handle_client(conn: socket.socket, addr) -> None:
 
     with conn:
         while True:
-            data = conn.recv(4096)
+            try:
+                data = conn.recv(4096)
+            except (ConnectionResetError, ConnectionAbortedError, OSError) as e:
+                print(f"[SCPI_SIM] Client disconnected (reset): {e}")
+                return
+
             if not data:
                 print("[SCPI_SIM] Client disconnected")
                 return
+
 
             # Step 12.c: line-based command parsing
             buffer += data

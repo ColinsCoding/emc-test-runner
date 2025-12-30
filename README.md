@@ -15,3 +15,10 @@ client. This includes sending basic SCPI commands (such as `*IDN?`, frequency
 setup, and trace acquisition) and verifying end-to-end connectivity using a
 simple test script. This establishes the foundation for later automation,
 logging, and GUI development.
+
+## If you get lost
+If you get lost or make mistakes, don't worry! You can always return to the
+baseline state of the project by checking out the `day1-baseline` Git branch.
+You can always return to this baseline state with:
+
+git checkout day1-baseline

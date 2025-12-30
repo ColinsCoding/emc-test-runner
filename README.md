@@ -57,3 +57,6 @@ python -m gui.app
 - The project is structured for clarity and ease of understanding SCPI workflows in EMC testing.
 - Contributions and improvements are welcome!
 
+
+<!-- refresh contributors -->
+

@@ -1,12 +1,12 @@
 # run_scpi_sweep.py
 import argparse
 import os
+
 from core.run_manifest import RunManifest, make_run_dir, now_iso
 from core.scpi_logger import ScpiLogger
 
 
 def parse_trace_csv_line(line: str) -> list[float]:
-    # line is comma-separated amplitudes
     parts = [p for p in line.split(",") if p]
     return [float(p) for p in parts]
 
@@ -18,7 +18,20 @@ def write_trace_csv(path: str, amps: list[float]) -> None:
             f.write(f"{i},{a:.2f}\n")
 
 
-def run_once(host: str, port: int, start_hz: float, stop_hz: float, points: int, run_dir: str):
+def is_retryable_error(e: Exception) -> bool:
+    """
+    Retry once on:
+      - simulator injected query errors: "ERROR:..."
+      - dropped connections / transport issues
+    """
+    msg = str(e)
+    if msg.startswith("ERROR:"):
+        return True
+    low = msg.lower()
+    return any(k in low for k in ("dropped", "drop", "reset", "aborted", "broken pipe", "failed to connect", "query failed", "write failed"))
+
+
+def run_once(host: str, port: int, start_hz: float, stop_hz: float, points: int, run_dir: str) -> RunManifest:
     transcript_path = os.path.join(run_dir, "scpi_transcript.log")
     csv_path = os.path.join(run_dir, "trace.csv")
     manifest_path = os.path.join(run_dir, "manifest.json")
@@ -56,9 +69,10 @@ def run_once(host: str, port: int, start_hz: float, stop_hz: float, points: int,
         scpi.write("INIT:IMM")
         trace_line = scpi.query("TRAC?")
 
-        # Simulated timeouts come back as ERROR:SIM_TIMEOUT
+        # Simulator injected errors
         if trace_line.startswith("ERROR:"):
-            raise TimeoutError(trace_line)
+            # Raise with message that starts with ERROR: so retry logic triggers
+            raise RuntimeError(trace_line)
 
         amps = parse_trace_csv_line(trace_line)
         if len(amps) != points:
@@ -88,49 +102,54 @@ def main() -> None:
     run_dir = make_run_dir("runs")
     manifest_path = os.path.join(run_dir, "manifest.json")
 
-    last_err = None
+    manifest: RunManifest | None = None
+    last_err: Exception | None = None
+
     for attempt in (1, 2):  # retry once
         try:
-            m = run_once(args.host, args.port, args.start_hz, args.stop_hz, args.points, run_dir)
-            m.end_time = now_iso()
-            m.write(manifest_path)
+            manifest = run_once(args.host, args.port, args.start_hz, args.stop_hz, args.points, run_dir)
+            manifest.end_time = now_iso()
+            manifest.error = None
+            manifest.write(manifest_path)
+
             print(f"Run dir: {run_dir}")
-            print(f"IDN: {m.idn}")
+            print(f"IDN: {manifest.idn}")
             print("status: PASS")
             return
+
         except Exception as e:
             last_err = e
-            # retry once on ERROR: or connection drop; we treat any exception as retryable for Day 2
-            if attempt == 1:
-                continue
-            # fail after retry
-            from core.run_manifest import RunManifest  # avoid circular import in some setups
-            # Read existing manifest fields by regenerating minimal finalization
-            # (We overwrite the manifest with status+end_time+error)
-            # Best practice: keep the same run_dir for traceability.
-            # NOTE: if you want, we can refactor to load existing json.
-            pass
 
-    # finalize failure manifest
-    # (recreate same manifest structure; safer than partial edits)
-    m_fail = RunManifest(
-        run_id=os.path.basename(run_dir),
-        start_time="",
-        end_time=now_iso(),
-        status="FAIL",
-        error=str(last_err),
-        host=args.host,
-        port=args.port,
-        idn=None,
-        sweep_start_hz=args.start_hz,
-        sweep_stop_hz=args.stop_hz,
-        sweep_points=args.points,
-        trace_csv="trace.csv",
-        transcript="scpi_transcript.log",
-    )
-    m_fail.write(manifest_path)
-    print(f"Run dir: {run_dir}")
-    print(f"status: FAIL ({last_err})")
+            # retry once only if retryable
+            if attempt == 1 and is_retryable_error(e):
+                continue
+
+            # finalize FAIL (ensure we have a manifest object)
+            if manifest is None:
+                manifest = RunManifest(
+                    run_id=os.path.basename(run_dir),
+                    start_time=now_iso(),
+                    end_time=None,
+                    status="RUNNING",
+                    error=None,
+                    host=args.host,
+                    port=args.port,
+                    idn=None,
+                    sweep_start_hz=args.start_hz,
+                    sweep_stop_hz=args.stop_hz,
+                    sweep_points=args.points,
+                    trace_csv="trace.csv",
+                    transcript="scpi_transcript.log",
+                )
+
+            manifest.status = "FAIL"
+            manifest.end_time = now_iso()
+            manifest.error = str(last_err)
+            manifest.write(manifest_path)
+
+            print(f"Run dir: {run_dir}")
+            print(f"status: FAIL ({last_err})")
+            return
 
 
 if __name__ == "__main__":
